@@ -1,5 +1,5 @@
 # ============================================================
-# Multi-Agent Research Lab (CrewAI / LangChain / HF Inference)
+# Multi-Agent Research Lab (HF Inference / DuckDuckGo / Orquestación)
 # ============================================================
 
 import os
@@ -18,8 +18,8 @@ def leer_token():
     token = os.getenv("HF_TOKEN")
     if token is None:
         raise ValueError(
-            "❌ ERROR: No se encontró HF_TOKEN en .env. "
-            "Asegúrate de crear un archivo .env con:\nHF_TOKEN=tu_token_aqui"
+            "❌ ERROR: No se encontró HF_TOKEN en .env.\n"
+            "Crea un archivo .env con:\nHF_TOKEN=tu_token_aqui"
         )
     return token
 
@@ -29,21 +29,22 @@ def leer_token():
 # ======================================================
 
 class Investigador:
+    """
+    Realiza búsquedas web usando DuckDuckGo.
+    """
     def __init__(self, top_k=5):
-        self.search = DuckDuckGoSearchAPIWrapper()   # Nueva API funcional
+        self.search = DuckDuckGoSearchAPIWrapper()  # API funcional
         self.top_k = top_k
 
     def buscar(self, query):
-        """
-        Realiza búsqueda web y devuelve títulos + snippets.
-        """
         try:
             resultados = self.search.results(query, max_results=self.top_k)
             textos = []
+
             for r in resultados:
                 titulo = r.get("title", "")
                 snippet = r.get("body", "")
-                textos.append(f"{titulo}\n{snippet}\n")
+                textos.append(f"📌 {titulo}\n{snippet}\n")
 
             return "\n".join(textos)
 
@@ -52,61 +53,62 @@ class Investigador:
 
 
 # ======================================================
-# 2. AGENTE REDACTOR (Modelo HF via API)
+# 2. AGENTE REDACTOR — Modelo HF via text_generation
 # ======================================================
 
 class Redactor:
-    def __init__(self, modelo="facebook/bart-large-cnn"):
+    """
+    Genera texto usando InferenceClient (HF).
+    """
+    def __init__(self, modelo="meta-llama/Llama-3.1-8B-Instruct"):
         self.modelo = modelo
         self.client = InferenceClient(token=leer_token())
 
     def generar_resumen(self, texto):
         """
-        Crea un resumen usando el modelo HF.
+        Genera un resumen o narrativa usando text_generation() actualizado.
         """
         try:
-            result = self.client.summarization(
+            respuesta = self.client.text_generation(
                 model=self.modelo,
-                text=texto
+                prompt=(
+                    "Eres un investigador académico. "
+                    "Resume los siguientes hallazgos en un estilo claro, conciso y profesional:\n\n"
+                    f"{texto}\n\nResumen:"
+                ),
+                max_new_tokens=450,
+                temperature=0.5,
             )
 
-            # Formato puede variar según el modelo
-            if isinstance(result, dict) and "summary_text" in result:
-                return result["summary_text"]
-
-            if hasattr(result, "summary_text"):
-                return result.summary_text
-
-            return str(result)
+            return respuesta
 
         except Exception as e:
-            return f"Error en generación de resumen: {e}"
+            return f"Error en generación: {e}"
 
 
 # ======================================================
-# 3. AGENTE REVISOR (Simulado)
+# 3. AGENTE REVISOR — Simula revisión académica
 # ======================================================
 
 class Revisor:
+    """
+    Genera retroalimentación del texto.
+    """
     def __init__(self):
         pass
 
     def evaluar_texto(self, texto):
-        """
-        Devuelve una crítica estilo LLM.
-        """
         evaluacion = (
-            "• El resumen es claro y mantiene coherencia general.\n"
-            "• Se recomienda fortalecer el tono académico.\n"
-            "• Podrías añadir ejemplos específicos para ilustrar los riesgos éticos.\n"
-            "• Sugiero añadir una frase que conecte explícitamente las aplicaciones prácticas con "
-            "los desafíos éticos discutidos."
+            "• El resumen presenta coherencia general y sigue una estructura clara.\n"
+            "• Se sugiere fortalecer el tono académico usando transiciones formales.\n"
+            "• Podrías incluir ejemplos concretos para ilustrar puntos clave.\n"
+            "• Incluye limitaciones o vacíos en la literatura para mayor solidez.\n"
         )
         return evaluacion
 
 
 # ======================================================
-# 4. COORDINADOR — ORQUESTA TODO EL FLUJO
+# 4. COORDINADOR — Orquesta el flujo
 # ======================================================
 
 class Coordinator:
@@ -116,17 +118,17 @@ class Coordinator:
         self.revisor = revisor
 
     def run(self, tema, top_k=5):
-        # 1. BÚSQUEDA
+        # 1) BÚSQUEDA
         fuentes = self.investigador.buscar(tema)
 
-        # 2. PRIMER BORRADOR
+        # 2) BORRADOR
         draft = self.redactor.generar_resumen(fuentes)
 
-        # 3. REVISIÓN
+        # 3) REVISIÓN
         review = self.revisor.evaluar_texto(draft)
 
-        # 4. RESUMEN FINAL (añadir mejoras sugeridas)
-        texto_final = (
+        # 4) FINAL
+        final = (
             f"{draft}\n\n"
             "### Ajustes propuestos por el revisor:\n"
             f"{review}\n"
@@ -136,5 +138,5 @@ class Coordinator:
             "sources": fuentes,
             "draft": draft,
             "review": review,
-            "final": texto_final
+            "final": final
         }
