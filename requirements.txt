@@ -1,0 +1,6 @@
+crewai
+langchain
+huggingface_hub
+duckduckgo-search
+chromadb
+pandas
