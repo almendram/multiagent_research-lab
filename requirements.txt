@@ -1,6 +1,9 @@
 crewai
 langchain
-huggingface_hub
+langchain-community
 duckduckgo-search
+huggingface-hub
 chromadb
 pandas
+tqdm
+python-dotenv
