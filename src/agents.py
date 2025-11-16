@@ -1,106 +1,143 @@
-from typing import List, Dict
-from crewai import Agent, Task, Crew
-from crewai_tools import tool
-from duckduckgo_search import DDGS
+# ============================================================
+# Multi-Agent Research Lab — Version estable para Google Colab
+# Compatible con: HF Inference API (sin inputs/prompt), DuckDuckGo
+# ============================================================
+
+import os
+from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
-
-# ======================
-# 1. Tool: Buscador Web
-# ======================
-@tool("busqueda_web")
-def busqueda_web(query: str) -> str:
-    """Realiza una búsqueda en DuckDuckGo y devuelve texto concatenado."""
-    resultados = []
-    with DDGS() as ddgs:
-        for r in ddgs.text(query, max_results=5):
-            title = r.get("title", "")
-            body = r.get("body", "")
-            resultados.append(f"{title}: {body}")
-    return "\n".join(resultados)
+from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 
 
-# =====================================================
-# 2. Wrapper simple para usar InferenceClient en CrewAI
-# =====================================================
-class HFModelWrapper:
-    def __init__(self, model_name: str):
-        self.client = InferenceClient(model_name)
+# ==========================
+# Cargar token HF
+# ==========================
 
-    def __call__(self, prompt: str) -> str:
-        """Permite que CrewAI use el modelo como si fuera un LLM."""
-        out = self.client.text_generation(prompt, max_new_tokens=400)
-        return out
+load_dotenv()
 
-
-# =========================
-# 3. Modelos Hugging Face
-# =========================
-summary_llm = HFModelWrapper("facebook/bart-large-cnn")
-review_llm  = HFModelWrapper("microsoft/deberta-v3-small")
+def leer_token():
+    token = os.getenv("HF_TOKEN")
+    if token is None:
+        raise ValueError(
+            "❌ ERROR: No se encontró HF_TOKEN en .env.\n"
+            "Crea un archivo .env con:\nHF_TOKEN=tu_token_aqui"
+        )
+    return token
 
 
-# ======================
-# 4. Crear Agentes
-# ======================
-def build_agents():
-    investigador = Agent(
-        name="Investigador",
-        role="Analista de información",
-        goal="Buscar información confiable sobre el tema solicitado.",
-        backstory="Experto en recuperación y análisis documental.",
-        tools=[busqueda_web],
-        verbose=True
-    )
 
-    redactor = Agent(
-        name="Redactor",
-        role="Redactor científico",
-        goal="Escribir un resumen claro y estructurado basado en los hallazgos del investigador.",
-        backstory="Especialista en comunicación y escritura científica.",
-        llm=summary_llm,
-        verbose=True
-    )
+# ======================================================
+# 1. AGENTE INVESTIGADOR (Search)
+# ======================================================
 
-    revisor = Agent(
-        name="Revisor",
-        role="Corrector académico",
-        goal="Revisar y mejorar el texto para claridad, coherencia y precisión.",
-        backstory="Editor profesional con experiencia en revisión académica.",
-        llm=review_llm,
-        verbose=True
-    )
+class Investigador:
+    def __init__(self, top_k=5):
+        self.top_k = top_k
+        self.search = DuckDuckGoSearchAPIWrapper()   # Wrapper correcto
 
-    return investigador, redactor, revisor
+    def buscar(self, query):
+        """
+        Realiza búsqueda web y devuelve títulos + snippets.
+        """
+        try:
+            resultados = self.search.results(query, max_results=self.top_k)
+            textos = []
+
+            for r in resultados:
+                titulo = r.get("title", "")
+                cuerpo = r.get("body", "")
+                textos.append(f"{titulo}\n{cuerpo}\n")
+
+            return "\n".join(textos)
+
+        except Exception as e:
+            return f"Error en búsqueda: {e}"
 
 
-# ======================
-# 5. Flujo CrewAI
-# ======================
-def build_workflow(topic="Tema de prueba"):
-    investigador, redactor, revisor = build_agents()
 
-    t1 = Task(
-        description=f"Investiga el siguiente tema y devuelve hallazgos clave: {topic}",
-        agent=investigador,
-        expected_output="Lista con hallazgos relevantes."
-    )
+# ======================================================
+# 2. AGENTE REDACTOR — RESUMEN (HF API)
+# ======================================================
 
-    t2 = Task(
-        description="Redacta un resumen de ~500 palabras basado en los hallazgos.",
-        agent=redactor,
-        expected_output="Resumen estructurado en formato Markdown."
-    )
+class Redactor:
+    def __init__(self, modelo="facebook/bart-large-cnn"):
+        self.modelo = modelo
+        self.client = InferenceClient(token=leer_token())
 
-    t3 = Task(
-        description="Revisa y corrige el resumen para mejorar claridad, coherencia y precisión.",
-        agent=revisor,
-        expected_output="Versión final en Markdown."
-    )
+    def generar_resumen(self, texto):
+        """
+        Resumen usando HuggingFace Inference API.
+        Importante: NO usamos 'inputs', 'prompt', etc.
+        """
+        try:
+            result = self.client.summarization(
+                model=self.modelo,
+                text=texto
+            )
 
-    crew = Crew(
-        agents=[investigador, redactor, revisor],
-        tasks=[t1, t2, t3],
-        verbose=True
-    )
+            # El API devuelve un dict
+            if isinstance(result, dict) and "summary_text" in result:
+                return result["summary_text"]
 
-    return crew
+            return str(result)
+
+        except Exception as e:
+            return f"Error en generación de resumen: {e}"
+
+
+
+# ======================================================
+# 3. AGENTE REVISOR
+# ======================================================
+
+class Revisor:
+    def __init__(self):
+        pass
+
+    def evaluar_texto(self, texto):
+        """
+        Evaluación simple simulada.
+        """
+        evaluacion = (
+            "• El texto presenta una estructura clara y mantiene coherencia general.\n"
+            "• Se recomienda reforzar el tono académico con transiciones más formales.\n"
+            "• Añadir ejemplos concretos que conecten aplicaciones con desafíos éticos.\n"
+            "• Sugerencia: incluir citas/links de respaldo y aclarar limitaciones metodológicas."
+        )
+        return evaluacion
+
+
+
+# ======================================================
+# 4. COORDINADOR — ORQUESTA TODO EL FLUJO
+# ======================================================
+
+class Coordinator:
+    def __init__(self, investigador, redactor, revisor):
+        self.investigador = investigador
+        self.redactor = redactor
+        self.revisor = revisor
+
+    def run(self, tema, top_k=5):
+        # 1. BÚSQUEDA
+        fuentes = self.investigador.buscar(tema)
+
+        # 2. PRIMER BORRADOR
+        draft = self.redactor.generar_resumen(fuentes)
+
+        # 3. REVISIÓN
+        review = self.revisor.evaluar_texto(draft)
+
+        # 4. TEXTO FINAL
+        final = (
+            f"{draft}\n\n"
+            "### Ajustes del revisor:\n"
+            f"{review}\n"
+        )
+
+        return {
+            "sources": fuentes,
+            "draft": draft,
+            "review": review,
+            "final": final
+        }
