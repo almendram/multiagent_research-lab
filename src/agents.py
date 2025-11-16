@@ -18,21 +18,36 @@ def busqueda_web(query: str) -> str:
             resultados.append(f"{title}: {body}")
     return "\n".join(resultados)
 
+
+# =====================================================
+# 2. Wrapper simple para usar InferenceClient en CrewAI
+# =====================================================
+class HFModelWrapper:
+    def __init__(self, model_name: str):
+        self.client = InferenceClient(model_name)
+
+    def __call__(self, prompt: str) -> str:
+        """Permite que CrewAI use el modelo como si fuera un LLM."""
+        out = self.client.text_generation(prompt, max_new_tokens=400)
+        return out
+
+
 # =========================
-# 2. Modelos Hugging Face
+# 3. Modelos Hugging Face
 # =========================
-summary_model = InferenceClient("facebook/bart-large-cnn")
-review_model  = InferenceClient("microsoft/deberta-v3-small")
+summary_llm = HFModelWrapper("facebook/bart-large-cnn")
+review_llm  = HFModelWrapper("microsoft/deberta-v3-small")
+
 
 # ======================
-# 3. Crear Agentes
+# 4. Crear Agentes
 # ======================
 def build_agents():
     investigador = Agent(
         name="Investigador",
         role="Analista de información",
-        goal="Buscar información confiable para el tema solicitado.",
-        backstory="Experto en recuperación de información y análisis documental.",
+        goal="Buscar información confiable sobre el tema solicitado.",
+        backstory="Experto en recuperación y análisis documental.",
         tools=[busqueda_web],
         verbose=True
     )
@@ -40,25 +55,26 @@ def build_agents():
     redactor = Agent(
         name="Redactor",
         role="Redactor científico",
-        goal="Escribir un resumen claro y estructurado basado en los hallazgos.",
-        backstory="Especialista en comunicación científica y escritura académica.",
-        llm=summary_model,
+        goal="Escribir un resumen claro y estructurado basado en los hallazgos del investigador.",
+        backstory="Especialista en comunicación y escritura científica.",
+        llm=summary_llm,
         verbose=True
     )
 
     revisor = Agent(
         name="Revisor",
         role="Corrector académico",
-        goal="Revisar y mejorar el texto generado por claridad y precisión.",
-        backstory="Editor profesional con experiencia en revisión científica.",
-        llm=review_model,
+        goal="Revisar y mejorar el texto para claridad, coherencia y precisión.",
+        backstory="Editor profesional con experiencia en revisión académica.",
+        llm=review_llm,
         verbose=True
     )
 
     return investigador, redactor, revisor
 
+
 # ======================
-# 4. Flujo CrewAI
+# 5. Flujo CrewAI
 # ======================
 def build_workflow(topic="Tema de prueba"):
     investigador, redactor, revisor = build_agents()
@@ -66,11 +82,11 @@ def build_workflow(topic="Tema de prueba"):
     t1 = Task(
         description=f"Investiga el siguiente tema y devuelve hallazgos clave: {topic}",
         agent=investigador,
-        expected_output="Lista estructurada con hallazgos relevantes."
+        expected_output="Lista con hallazgos relevantes."
     )
 
     t2 = Task(
-        description="Redacta un resumen de aproximadamente 500 palabras basado en los hallazgos.",
+        description="Redacta un resumen de ~500 palabras basado en los hallazgos.",
         agent=redactor,
         expected_output="Resumen estructurado en formato Markdown."
     )
@@ -78,7 +94,7 @@ def build_workflow(topic="Tema de prueba"):
     t3 = Task(
         description="Revisa y corrige el resumen para mejorar claridad, coherencia y precisión.",
         agent=revisor,
-        expected_output="Versión final corregida del resumen en Markdown."
+        expected_output="Versión final en Markdown."
     )
 
     crew = Crew(
