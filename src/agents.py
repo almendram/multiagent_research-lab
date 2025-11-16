@@ -1,22 +1,23 @@
 # src/agents.py
 
-from langchain import HuggingFaceHub, LLMChain, PromptTemplate
+from langchain_huggingface import HuggingFaceEndpoint
+from langchain import PromptTemplate
+from langchain.chains import LLMChain
 from langchain_community.tools import DuckDuckGoSearchRun
 import json
 
+
 # -------------------------------------------------
-# Cargar modelo HuggingFaceHub SIEMPRE con task fijo
+# Cargar modelo HuggingFace Hosted Inference API
 # -------------------------------------------------
 def cargar_llm(repo_id, hf_token, max_length=512, temperature=0.3):
-    return HuggingFaceHub(
+    return HuggingFaceEndpoint(
         repo_id=repo_id,
-        huggingfacehub_api_token=hf_token,
-        task="text2text-generation",      # ← FUNDAMENTAL
-        model_kwargs={
-            "max_length": max_length,
-            "temperature": temperature,
-        }
+        huggingface_api_key=hf_token,
+        max_length=max_length,
+        temperature=temperature,
     )
+
 
 # -------------------------------------------------
 # AGENTE INVESTIGADOR
@@ -39,6 +40,7 @@ def investigador_buscar(query: str, top_k: int = 5):
         results.append({"title": query, "snippet": str(raw), "link": ""})
 
     return results
+
 
 # -------------------------------------------------
 # AGENTE ESCRITOR
@@ -65,8 +67,10 @@ Escribe en español.
 """
 
     prompt = PromptTemplate(template=prompt_template, input_variables=["sources", "word_target"])
-    chain = LLMChain(llm=llm, prompt=prompt)
-    return chain.run({"sources": aggregated, "word_target": word_target})
+    chain = LLMChain(prompt=prompt, llm=llm)
+
+    return chain.invoke({"sources": aggregated, "word_target": word_target})["text"]
+
 
 # -------------------------------------------------
 # AGENTE REVISOR
@@ -89,14 +93,15 @@ Texto:
 """
 
     prompt = PromptTemplate(template=prompt_template, input_variables=["borrador"])
-    chain = LLMChain(llm=llm, prompt=prompt)
+    chain = LLMChain(prompt=prompt, llm=llm)
 
-    raw = chain.run({"borrador": borrador_md})
+    raw = chain.invoke({"borrador": borrador_md})["text"]
 
     try:
         return json.loads(raw)
     except:
         return {"raw_output": raw}
+
 
 # -------------------------------------------------
 # FLUJO COMPLETO
@@ -136,8 +141,8 @@ Mantén la estructura:
         input_variables=["suggestions", "draft"]
     )
 
-    chain_final = LLMChain(llm=llm_writer, prompt=final_prompt)
-    final_md = chain_final.run({"suggestions": sugerencias, "draft": borrador})
+    chain_final = LLMChain(prompt=final_prompt, llm=llm_writer)
+    final_md = chain_final.invoke({"suggestions": sugerencias, "draft": borrador})["text"]
 
     with open(save_md_path, "w", encoding="utf-8") as f:
         f.write(final_md)
