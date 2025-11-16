@@ -10,12 +10,12 @@ import json
 # -------------------------------------------------
 # Cargar modelo HuggingFace Hosted Inference API
 # -------------------------------------------------
-def cargar_llm(repo_id, hf_token, max_length=512, temperature=0.3):
+def cargar_llm(repo_id: str, hf_token: str, temperature=0.3, max_new_tokens=512):
     return HuggingFaceEndpoint(
         repo_id=repo_id,
-        huggingface_api_key=hf_token,
-        max_length=max_length,
         temperature=temperature,
+        max_new_tokens=max_new_tokens,
+        huggingfacehub_api_token=hf_token
     )
 
 
@@ -46,7 +46,7 @@ def investigador_buscar(query: str, top_k: int = 5):
 # AGENTE ESCRITOR
 # -------------------------------------------------
 def escritor_generar_borrador(sources: list, hf_token: str, repo_id: str, word_target: int = 500):
-    llm = cargar_llm(repo_id, hf_token, max_length=1024, temperature=0.2)
+    llm = cargar_llm(repo_id, hf_token, max_new_tokens=512, temperature=0.2)
 
     aggregated = "\n\n".join(
         [f"Title: {s['title']}\nSnippet: {s['snippet']}\nLink: {s['link']}" for s in sources]
